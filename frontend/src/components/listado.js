@@ -18,46 +18,135 @@ export const formatearFecha = (iso) =>
   new Date(`${iso}T00:00:00`).toLocaleDateString("es-CR", { day: "numeric", month: "short", year: "numeric" });
 
 /**
- * TODO [F2] Listado y paginación.
- *
- * cargarPagina(pagina):
- *  - Marque la lista como ocupada (aria-busy="true") mientras carga y desmárquela al terminar.
- *  - Obtenga la página con listarEquipos(pagina, POR_PAGINA).
- *  - Vacíe la lista y, por cada equipo, clone #tpl-equipo y llene:
- *      .codigo, .nombre, .categoria (nombre de la categoría), .fecha (con formatearFecha)
- *      .estado  -> texto del estado y atributo data-estado="<estado>" (el CSS le da color)
- *      li       -> atributo data-id="<id>"
- *    Use SIEMPRE textContent con los datos de la API (nunca innerHTML).
- *  - Si no hay equipos, muestre un <li class="vacio"> con "No hay equipos registrados."
- *  - #resumen:      "Mostrando <from>–<to> de <total>"
- *  - #pagina-actual: "Página <current_page> de <last_page>"
- *  - Deshabilite #btn-anterior en la primera página y #btn-siguiente en la última.
- *  - Si falla, muestre el error con mostrarMensaje("error", ...).
+ * [F2] Listado y paginación.
  */
 export const cargarPagina = async (pagina = 1) => {
-  // TODO
+  $lista.setAttribute("aria-busy", "true");
+
+  try {
+    const respuesta = await listarEquipos(pagina, POR_PAGINA);
+    const { data: equipos, meta } = respuesta;
+
+    paginaActual = meta.current_page;
+    ultimaPagina = meta.last_page;
+
+    // Vaciar lista
+    $lista.replaceChildren();
+
+    if (!equipos || equipos.length === 0) {
+      const liVacio = document.createElement("li");
+      liVacio.className = "vacio";
+      liVacio.textContent = "No hay equipos registrados.";
+      $lista.appendChild(liVacio);
+    } else {
+      equipos.forEach((equipo) => {
+        const clon = $plantilla.content.cloneNode(true);
+        const li = clon.querySelector("li");
+
+        if (li) {
+          li.dataset.id = equipo.id;
+        }
+
+        const elCodigo = clon.querySelector(".codigo");
+        if (elCodigo) elCodigo.textContent = equipo.codigo;
+
+        const elNombre = clon.querySelector(".nombre");
+        if (elNombre) elNombre.textContent = equipo.nombre;
+
+        const elCategoria = clon.querySelector(".categoria");
+        if (elCategoria) {
+          elCategoria.textContent = equipo.categoria?.nombre ?? "";
+        }
+
+        const elFecha = clon.querySelector(".fecha");
+        if (elFecha) {
+          elFecha.textContent = formatearFecha(equipo.fecha_adquisicion);
+        }
+
+        const elEstado = clon.querySelector(".estado");
+        if (elEstado) {
+          elEstado.textContent = equipo.estado;
+          elEstado.dataset.estado = equipo.estado;
+        }
+
+        $lista.appendChild(clon);
+      });
+    }
+
+    if ($resumen) {
+      const from = meta.from ?? 0;
+      const to = meta.to ?? 0;
+      const total = meta.total ?? 0;
+      $resumen.textContent = `Mostrando ${from}–${to} de ${total}`;
+    }
+
+    if ($paginaActual) {
+      $paginaActual.textContent = `Página ${meta.current_page} de ${meta.last_page}`;
+    }
+
+    if ($btnAnterior) {
+      $btnAnterior.disabled = meta.current_page <= 1;
+    }
+
+    if ($btnSiguiente) {
+      $btnSiguiente.disabled = meta.current_page >= meta.last_page;
+    }
+  } catch (error) {
+    mostrarMensaje("error", error.message || "Error al cargar los equipos.");
+  } finally {
+    $lista.removeAttribute("aria-busy");
+  }
 };
 
 /**
- * TODO [F4] Eliminación con manejo de reglas de negocio.
- *
- * Use DELEGACIÓN DE EVENTOS: un solo listener en $lista que detecte clics en .btn-eliminar.
- *  - Pida confirmación con confirm().
- *  - Llame a eliminarEquipo(id).
- *  - 204: muestre "Equipo eliminado." y recargue la página actual
- *         (si era el último de la página y no es la primera, vaya a la anterior).
- *  - 409: muestre el mensaje que envía la API (error.datos.mensaje).
- *  - Otro error: muestre un mensaje general.
+ * [F4] Eliminación con manejo de reglas de negocio.
  */
 const alHacerClicEnLista = async (evento) => {
-  // TODO
+  const btn = evento.target.closest(".btn-eliminar");
+  if (!btn) return;
+
+  const li = btn.closest("li");
+  const id = li?.dataset.id;
+  if (!id) return;
+
+  if (!confirm("¿Está seguro de que desea eliminar este equipo?")) {
+    return;
+  }
+
+  try {
+    await eliminarEquipo(id);
+    mostrarMensaje("exito", "Equipo eliminado.");
+
+    // Si era el único equipo visible en la página actual y no estamos en la primera, retroceder
+    const equiposEnLista = $lista.querySelectorAll("li:not(.vacio)");
+    if (equiposEnLista.length <= 1 && paginaActual > 1) {
+      await cargarPagina(paginaActual - 1);
+    } else {
+      await cargarPagina(paginaActual);
+    }
+  } catch (error) {
+    if (error.status === 409 && error.datos?.mensaje) {
+      mostrarMensaje("error", error.datos.mensaje);
+    } else {
+      mostrarMensaje("error", error.message || "Error al eliminar el equipo.");
+    }
+  }
 };
 
-// Parcialmente implementado: complete el TODO de los botones de paginación.
 export const iniciarListado = () => {
   $lista.addEventListener("click", alHacerClicEnLista);
 
-  // TODO [F2] Conecte #btn-anterior y #btn-siguiente con cargarPagina()
+  $btnAnterior.addEventListener("click", () => {
+    if (paginaActual > 1) {
+      cargarPagina(paginaActual - 1);
+    }
+  });
+
+  $btnSiguiente.addEventListener("click", () => {
+    if (paginaActual < ultimaPagina) {
+      cargarPagina(paginaActual + 1);
+    }
+  });
 
   cargarPagina(1);
 };
